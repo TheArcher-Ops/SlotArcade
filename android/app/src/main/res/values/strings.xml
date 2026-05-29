@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Gem Reels</string>
+    <string name="title_activity_main">Gem Reels</string>
+    <string name="package_name">com.slotarcade.gemreels</string>
+    <string name="custom_url_scheme">com.slotarcade.gemreels</string>
+</resources>

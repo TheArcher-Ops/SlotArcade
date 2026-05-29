@@ -32,6 +32,43 @@ npm run preview  # serve the production build locally
 npm test         # run the engine unit tests (Vitest)
 ```
 
+## 📱 Android APK
+
+The game is wrapped as a native Android app with [Capacitor](https://capacitorjs.com/),
+so it can be installed as an `.apk`.
+
+### Download the prebuilt APK (easiest)
+
+A GitHub Actions workflow builds the APK on every push and uploads it as a downloadable artifact:
+
+1. Open the repo's **Actions** tab → **Build Android APK** → the latest successful run.
+2. Download the **`gem-reels-debug-apk`** artifact and unzip it to get `app-debug.apk`.
+3. Copy it to an Android device and install (enable *Install unknown apps* for your file manager).
+
+Pushing a tag like `v1.0.0` also attaches the APK to a **GitHub Release** for a stable download link.
+
+> The APK is a **debug build** signed with Android's debug key — perfect for sideloading and
+> testing, but not for Play Store distribution (that needs a release keystore).
+
+### Build the APK yourself
+
+Requires a **JDK (17+)** and the **Android SDK** (e.g. via Android Studio). Then:
+
+```bash
+npm install
+npm run android:apk     # builds the web app, syncs Capacitor, and runs Gradle
+# → android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Or open the native project in Android Studio to run on a device/emulator:
+
+```bash
+npm run android:open
+```
+
+> Note: this can't be built inside the Claude Code web sandbox because Google's SDK/Maven
+> servers are not reachable there — use GitHub Actions or a local machine.
+
 ## How it works
 
 The code separates **pure game logic** from the **React UI** so the core is fully testable
