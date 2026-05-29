@@ -1,15 +1,29 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useGameState } from '../state/useGameState';
-import { setMuted as setAudioMuted } from '../audio/sounds';
+import { setMuted as setAudioMuted, startBgMusic } from '../audio/sounds';
 import { Reel } from './Reel';
 import { Controls } from './Controls';
 import { Paytable } from './Paytable';
 import { WinOverlay } from './WinOverlay';
 
-/** Top-level game: wires the game-state hook into the UI. */
 export function SlotMachine() {
   const game = useGameState();
   const [muted, setMuted] = useState(false);
+  const musicStarted = useRef(false);
+
+  // Start background music on the very first user interaction so the
+  // AudioContext is unlocked by a gesture (browser requirement).
+  const ensureMusic = () => {
+    if (!musicStarted.current) {
+      musicStarted.current = true;
+      startBgMusic();
+    }
+  };
+
+  const handleSpin = () => {
+    ensureMusic();
+    game.spin();
+  };
 
   const toggleMute = () => {
     setMuted((m) => {
@@ -32,12 +46,7 @@ export function SlotMachine() {
         <WinOverlay result={game.lastResult} />
         <div className="reels">
           {game.grid.reels.map((reel, i) => (
-            <Reel
-              key={i}
-              reel={reel}
-              spinning={game.reelSpinning[i]}
-              highlight={won}
-            />
+            <Reel key={i} reel={reel} spinning={game.reelSpinning[i]} highlight={won} />
           ))}
         </div>
         <div className="payline-marker" aria-hidden="true" />
@@ -47,13 +56,12 @@ export function SlotMachine() {
         credits={game.credits}
         bet={game.bet}
         isSpinning={game.isSpinning}
-        autoplay={game.autoplay}
         muted={muted}
         lastWin={game.lastResult?.win ?? null}
-        onSpin={game.spin}
+        onSpin={handleSpin}
         onIncrementBet={game.incrementBet}
         onDecrementBet={game.decrementBet}
-        onToggleAutoplay={game.toggleAutoplay}
+        onDeposit={game.deposit}
         onToggleMute={toggleMute}
         onResetCredits={game.resetCredits}
       />

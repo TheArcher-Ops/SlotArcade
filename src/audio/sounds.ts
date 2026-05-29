@@ -1,13 +1,12 @@
-/**
- * Sound effects synthesized with the Web Audio API so the game ships with no
- * binary audio assets (works fully offline). Each effect is a short sequence
- * of oscillator tones.
- */
-
 type SoundName = 'spin' | 'stop' | 'win' | 'jackpot';
 
 let ctx: AudioContext | null = null;
 let muted = false;
+
+// Background music state
+let bgMasterGain: GainNode | null = null;
+let bgOscs: OscillatorNode[] = [];
+let bgStarted = false;
 
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -18,12 +17,10 @@ function getCtx(): AudioContext | null {
     if (!Ctor) return null;
     ctx = new Ctor();
   }
-  // Browsers start the context suspended until a user gesture occurs.
   if (ctx.state === 'suspended') void ctx.resume();
   return ctx;
 }
 
-/** Play a single tone. */
 function tone(
   audio: AudioContext,
   freq: number,
@@ -36,11 +33,9 @@ function tone(
   const env = audio.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, startAt);
-
   env.gain.setValueAtTime(0.0001, startAt);
   env.gain.exponentialRampToValueAtTime(gain, startAt + 0.01);
   env.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-
   osc.connect(env).connect(audio.destination);
   osc.start(startAt);
   osc.stop(startAt + duration + 0.02);
@@ -53,8 +48,7 @@ const RECIPES: Record<SoundName, (audio: AudioContext) => void> = {
     tone(audio, 330, now + 0.06, 0.12, 'sawtooth', 0.06);
   },
   stop: (audio) => {
-    const now = audio.currentTime;
-    tone(audio, 160, now, 0.08, 'square', 0.1);
+    tone(audio, 160, audio.currentTime, 0.08, 'square', 0.1);
   },
   win: (audio) => {
     const now = audio.currentTime;
@@ -62,12 +56,12 @@ const RECIPES: Record<SoundName, (audio: AudioContext) => void> = {
   },
   jackpot: (audio) => {
     const now = audio.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
-    notes.forEach((f, i) => tone(audio, f, now + i * 0.09, 0.25, 'triangle', 0.18));
+    [523.25, 659.25, 783.99, 1046.5, 1318.51].forEach((f, i) =>
+      tone(audio, f, now + i * 0.09, 0.25, 'triangle', 0.18),
+    );
   },
 };
 
-/** Play a named sound effect (no-op when muted or unsupported). */
 export function playSound(name: SoundName) {
   if (muted) return;
   const audio = getCtx();
@@ -75,12 +69,76 @@ export function playSound(name: SoundName) {
   try {
     RECIPES[name](audio);
   } catch {
-    // Audio is non-essential; never let it break gameplay.
+    // Non-essential — never break gameplay.
   }
+}
+
+/**
+ * Start the ambient background music loop. Safe to call multiple times —
+ * only starts once. Requires a prior user gesture to unlock the AudioContext.
+ */
+export function startBgMusic() {
+  if (muted || bgStarted) return;
+  const audio = getCtx();
+  if (!audio) return;
+
+  bgStarted = true;
+
+  const master = audio.createGain();
+  // Fade in gently over 3 seconds.
+  master.gain.setValueAtTime(0.0001, audio.currentTime);
+  master.gain.exponentialRampToValueAtTime(0.055, audio.currentTime + 3);
+  master.connect(audio.destination);
+  bgMasterGain = master;
+
+  // Ambient minor chord: A1 E2 A2 C3 — low, mysterious, gem-cave feel.
+  const layers: Array<{ freq: number; type: OscillatorType; detune: number; vol: number }> = [
+    { freq: 55,     type: 'sine',     detune:  0,  vol: 0.5 },
+    { freq: 82.41,  type: 'sine',     detune:  4,  vol: 0.4 },
+    { freq: 110,    type: 'triangle', detune: -4,  vol: 0.3 },
+    { freq: 130.81, type: 'triangle', detune:  3,  vol: 0.25 },
+    { freq: 220,    type: 'sine',     detune: -3,  vol: 0.15 },
+  ];
+
+  bgOscs = layers.map(({ freq, type, detune, vol }) => {
+    const osc = audio.createOscillator();
+    const g = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audio.currentTime);
+    osc.detune.setValueAtTime(detune, audio.currentTime);
+    g.gain.setValueAtTime(vol, audio.currentTime);
+    osc.connect(g).connect(master);
+    osc.start();
+    return osc;
+  });
+
+  // Very slow LFO (0.12 Hz) for a subtle breathing pulse on the master gain.
+  const lfo = audio.createOscillator();
+  const lfoGain = audio.createGain();
+  lfo.type = 'sine';
+  lfo.frequency.setValueAtTime(0.12, audio.currentTime);
+  lfoGain.gain.setValueAtTime(0.012, audio.currentTime);
+  lfo.connect(lfoGain).connect(master.gain);
+  lfo.start();
+  bgOscs.push(lfo);
+}
+
+function stopBgMusicInternal() {
+  bgOscs.forEach((osc) => { try { osc.stop(); } catch { /* already stopped */ } });
+  bgOscs = [];
+  bgMasterGain?.disconnect();
+  bgMasterGain = null;
+  bgStarted = false;
 }
 
 export function setMuted(value: boolean) {
   muted = value;
+  if (value) {
+    stopBgMusicInternal();
+  } else {
+    // Restart music when unmuted (requires AudioContext — needs prior gesture).
+    startBgMusic();
+  }
 }
 
 export function isMuted() {
