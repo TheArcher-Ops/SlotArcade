@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createRng, pickSymbol, spinReels, evaluateSpin } from './engine';
-import { SYMBOLS, JACKPOT_MULTIPLIER } from './symbols';
+import { createRng, pickSymbol, spinReels, evaluateSpin, PAYLINES } from './engine';
+import { SYMBOLS, JACKPOT_MULTIPLIER, TOTAL_WEIGHT } from './symbols';
 import type { SpinResult, Symbol } from './types';
 
 const byId = (id: string): Symbol => {
@@ -181,5 +181,31 @@ describe('evaluateSpin — no win', () => {
     expect(e.isJackpot).toBe(false);
     expect(e.matchedSymbol).toBeNull();
     expect(e.lineWins).toEqual([]);
+  });
+});
+
+describe('return-to-player (RTP)', () => {
+  it('stays in a balanced band (~95%) given the paytable and paylines', () => {
+    // Each payline is 3 independent reel draws. A line wins symbol G when every
+    // cell is G-or-wild, excluding the all-wild jackpot case. Expectation is
+    // linear, so total RTP = (number of paylines) x (expected payout per line),
+    // in units of the bet.
+    const wild = SYMBOLS.find((s) => s.isWild);
+    if (!wild) throw new Error('expected a wild symbol');
+    const w = wild.weight / TOTAL_WEIGHT;
+    const cells = PAYLINES[0].cells.length; // 3
+
+    let perLine = 0;
+    for (const s of SYMBOLS) {
+      if (s.isWild) continue;
+      const p = s.weight / TOTAL_WEIGHT;
+      const winProb = (p + w) ** cells - w ** cells;
+      perLine += winProb * s.payout;
+    }
+    perLine += w ** cells * JACKPOT_MULTIPLIER; // jackpot: all wilds
+
+    const rtp = PAYLINES.length * perLine;
+    expect(rtp).toBeGreaterThan(0.92);
+    expect(rtp).toBeLessThan(0.97);
   });
 });
