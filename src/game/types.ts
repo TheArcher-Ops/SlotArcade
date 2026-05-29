@@ -19,7 +19,7 @@ export interface Symbol {
 
 /**
  * One reel is the column of symbols currently visible. We show 3 rows per
- * reel; index 1 (the center row) is the active payline.
+ * reel (index 0 = top, 1 = center, 2 = bottom).
  */
 export type Reel = [Symbol, Symbol, Symbol];
 
@@ -28,14 +28,38 @@ export interface SpinResult {
   reels: [Reel, Reel, Reel];
 }
 
-/** The outcome of evaluating a spin against the payline. */
-export interface SpinEvaluation {
-  /** Credits won (0 when there is no winning combination). */
-  win: number;
-  /** True when the win is the all-wild jackpot. */
+/** A coordinate on the grid: [reelIndex, rowIndex]. */
+export type Cell = readonly [number, number];
+
+/** A winning line pattern — three cells, ordered left-to-right by reel. */
+export interface Payline {
+  id: string;
+  name: string;
+  cells: readonly [Cell, Cell, Cell];
+}
+
+/** A single payline that won on a spin. */
+export interface LineWin {
+  /** Which payline won (matches a Payline.id). */
+  lineId: string;
+  /** The symbol that formed the line. */
+  symbol: Symbol;
+  /** True when this line is the all-wild jackpot. */
   isJackpot: boolean;
-  /** The symbol that formed the winning line, if any. */
+  /** Credits won on this line. */
+  win: number;
+}
+
+/** The outcome of evaluating a spin across all paylines. */
+export interface SpinEvaluation {
+  /** Total credits won across every winning line (0 when there is no win). */
+  win: number;
+  /** True when any winning line is the all-wild jackpot. */
+  isJackpot: boolean;
+  /** The symbol of the highest-paying winning line, for display (null if no win). */
   matchedSymbol: Symbol | null;
+  /** Every payline that won this spin. */
+  lineWins: LineWin[];
 }
 
 /** A pseudo-random number generator returning a float in [0, 1). */

@@ -32,10 +32,14 @@ export function Paytable() {
           </li>
         )}
       </ul>
+      <p className="paytable-note">
+        <strong>3 paylines:</strong> the center row and both diagonals (an X). Match three of a
+        kind on any line to win — multiple lines can pay on the same spin and the payouts add up.
+      </p>
       {wild && (
         <p className="paytable-note">
           {wild.glyph} <strong>Wild Orb</strong> substitutes for any gem to complete a line.
-          Land three across the center to win the jackpot. Only the center row pays.
+          Three Wilds on a line wins the jackpot.
         </p>
       )}
     </div>

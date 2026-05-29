@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRng, pickSymbol, spinReels, evaluateSpin } from './engine';
 import { SYMBOLS, JACKPOT_MULTIPLIER } from './symbols';
-import type { Reel, SpinResult, Symbol } from './types';
+import type { SpinResult, Symbol } from './types';
 
 const byId = (id: string): Symbol => {
   const s = SYMBOLS.find((x) => x.id === id);
@@ -9,20 +9,36 @@ const byId = (id: string): Symbol => {
   return s;
 };
 
-/** Build a SpinResult whose center payline is the given three symbols. */
-const lineOf = (a: Symbol, b: Symbol, c: Symbol): SpinResult => {
-  const filler = byId('amethyst');
-  const reel = (mid: Symbol): Reel => [filler, mid, filler];
-  return { reels: [reel(a), reel(b), reel(c)] };
-};
+/**
+ * Build a SpinResult from three visual rows (top, center, bottom), each of
+ * three symbols left-to-right. Transposes into the reel-major grid the engine
+ * expects (reels[reel][row]).
+ */
+const grid = (
+  top: [Symbol, Symbol, Symbol],
+  center: [Symbol, Symbol, Symbol],
+  bottom: [Symbol, Symbol, Symbol],
+): SpinResult => ({
+  reels: [
+    [top[0], center[0], bottom[0]],
+    [top[1], center[1], bottom[1]],
+    [top[2], center[2], bottom[2]],
+  ],
+});
+
+const amethyst = byId('amethyst');
+const emerald = byId('emerald');
+const sapphire = byId('sapphire');
+const ruby = byId('ruby');
+const crown = byId('crown');
+const diamond = byId('diamond');
+const wild = byId('wild');
 
 describe('createRng', () => {
   it('is deterministic for a given seed', () => {
     const a = createRng(42);
     const b = createRng(42);
-    const seqA = [a(), a(), a(), a()];
-    const seqB = [b(), b(), b(), b()];
-    expect(seqA).toEqual(seqB);
+    expect([a(), a(), a(), a()]).toEqual([b(), b(), b(), b()]);
   });
 
   it('returns values in [0, 1)', () => {
@@ -43,8 +59,7 @@ describe('pickSymbol', () => {
   it('always returns a defined symbol from the set', () => {
     const rng = createRng(7);
     for (let i = 0; i < 500; i++) {
-      const s = pickSymbol(rng);
-      expect(SYMBOLS).toContain(s);
+      expect(SYMBOLS).toContain(pickSymbol(rng));
     }
   });
 
@@ -55,7 +70,6 @@ describe('pickSymbol', () => {
       const s = pickSymbol(rng);
       counts[s.id] = (counts[s.id] ?? 0) + 1;
     }
-    // Amethyst (weight 30) should clearly out-appear Diamond (weight 4).
     expect(counts['amethyst']).toBeGreaterThan(counts['diamond']);
   });
 });
@@ -66,82 +80,106 @@ describe('spinReels', () => {
     expect(result.reels).toHaveLength(3);
     for (const reel of result.reels) {
       expect(reel).toHaveLength(3);
-      for (const sym of reel) {
-        expect(SYMBOLS).toContain(sym);
-      }
+      for (const sym of reel) expect(SYMBOLS).toContain(sym);
     }
   });
 });
 
-describe('evaluateSpin', () => {
-  it('pays the gem multiplier for a 3-of-a-kind on the payline', () => {
-    const ruby = byId('ruby');
-    const result = lineOf(ruby, ruby, ruby);
-    const evalResult = evaluateSpin(result, 10);
-    expect(evalResult.win).toBe(10 * ruby.payout);
-    expect(evalResult.isJackpot).toBe(false);
-    expect(evalResult.matchedSymbol?.id).toBe('ruby');
+describe('evaluateSpin — center row (D-E-F)', () => {
+  it('pays the gem multiplier for 3-of-a-kind on the center row', () => {
+    // Center = ruby; corners emerald so the diagonals do not win.
+    const result = grid([emerald, emerald, emerald], [ruby, ruby, ruby], [emerald, emerald, emerald]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(10 * ruby.payout);
+    expect(e.isJackpot).toBe(false);
+    expect(e.matchedSymbol?.id).toBe('ruby');
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['center']);
   });
 
   it('uses each gem\'s own multiplier', () => {
-    for (const id of ['amethyst', 'emerald', 'sapphire', 'ruby', 'crown', 'diamond']) {
-      const gem = byId(id);
-      const evalResult = evaluateSpin(lineOf(gem, gem, gem), 5);
-      expect(evalResult.win).toBe(5 * gem.payout);
+    for (const gem of [amethyst, emerald, sapphire, ruby, crown, diamond]) {
+      const filler = gem.id === 'amethyst' ? emerald : amethyst;
+      const result = grid([filler, filler, filler], [gem, gem, gem], [filler, filler, filler]);
+      expect(evaluateSpin(result, 5).win).toBe(5 * gem.payout);
     }
   });
 
-  it('substitutes wilds for a gem to complete a line', () => {
-    const diamond = byId('diamond');
-    const wild = byId('wild');
-    const result = lineOf(diamond, wild, diamond);
-    const evalResult = evaluateSpin(result, 10);
-    expect(evalResult.win).toBe(10 * diamond.payout);
-    expect(evalResult.isJackpot).toBe(false);
-    expect(evalResult.matchedSymbol?.id).toBe('diamond');
-  });
-
-  it('treats two wilds plus a gem as that gem', () => {
-    const crown = byId('crown');
-    const wild = byId('wild');
-    const evalResult = evaluateSpin(lineOf(wild, crown, wild), 2);
-    expect(evalResult.win).toBe(2 * crown.payout);
-    expect(evalResult.matchedSymbol?.id).toBe('crown');
-  });
-
-  it('awards the jackpot for three wilds', () => {
-    const wild = byId('wild');
-    const evalResult = evaluateSpin(lineOf(wild, wild, wild), 10);
-    expect(evalResult.isJackpot).toBe(true);
-    expect(evalResult.win).toBe(10 * JACKPOT_MULTIPLIER);
-    expect(evalResult.matchedSymbol?.id).toBe('wild');
-  });
-
-  it('pays nothing for a non-matching line', () => {
-    const evalResult = evaluateSpin(lineOf(byId('ruby'), byId('emerald'), byId('diamond')), 10);
-    expect(evalResult.win).toBe(0);
-    expect(evalResult.isJackpot).toBe(false);
-    expect(evalResult.matchedSymbol).toBeNull();
-  });
-
-  it('ignores symbols off the payline (only the center row counts)', () => {
-    const ruby = byId('ruby');
-    const emerald = byId('emerald');
-    // Center row is all ruby; top/bottom rows differ but must not matter.
-    const result: SpinResult = {
-      reels: [
-        [emerald, ruby, emerald],
-        [emerald, ruby, emerald],
-        [emerald, ruby, emerald],
-      ],
-    };
-    expect(evaluateSpin(result, 10).win).toBe(10 * ruby.payout);
-  });
-
   it('scales the win with the bet', () => {
-    const diamond = byId('diamond');
-    const line = lineOf(diamond, diamond, diamond);
-    expect(evaluateSpin(line, 1).win).toBe(diamond.payout);
-    expect(evaluateSpin(line, 100).win).toBe(100 * diamond.payout);
+    const result = grid([emerald, emerald, emerald], [diamond, diamond, diamond], [emerald, emerald, emerald]);
+    expect(evaluateSpin(result, 1).win).toBe(diamond.payout);
+    expect(evaluateSpin(result, 100).win).toBe(100 * diamond.payout);
+  });
+});
+
+describe('evaluateSpin — diagonals', () => {
+  it('pays the ↘ diagonal A-E-I (top-left → bottom-right)', () => {
+    const result = grid([ruby, emerald, emerald], [emerald, ruby, emerald], [emerald, emerald, ruby]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(10 * ruby.payout);
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['diagDown']);
+  });
+
+  it('pays the ↗ diagonal C-E-G (top-right → bottom-left)', () => {
+    const result = grid([emerald, emerald, ruby], [emerald, ruby, emerald], [ruby, emerald, emerald]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(10 * ruby.payout);
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['diagUp']);
+  });
+});
+
+describe('evaluateSpin — multiple lines stack', () => {
+  it('pays both diagonals (an X) and sums the payouts', () => {
+    // Both diagonals ruby; center (emerald,ruby,emerald) does not win.
+    const result = grid([ruby, emerald, ruby], [emerald, ruby, emerald], [ruby, emerald, ruby]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(2 * 10 * ruby.payout);
+    expect(e.lineWins.map((w) => w.lineId).sort()).toEqual(['diagDown', 'diagUp']);
+  });
+
+  it('pays all three lines when every cell matches', () => {
+    const result = grid([ruby, ruby, ruby], [ruby, ruby, ruby], [ruby, ruby, ruby]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(3 * 10 * ruby.payout);
+    expect(e.lineWins).toHaveLength(3);
+  });
+
+  it('reports the highest-paying line as the matched symbol', () => {
+    // Center diamond (high), ↘ diagonal emerald (low). diagUp does not win.
+    const result = grid([emerald, diamond, ruby], [diamond, diamond, diamond], [crown, emerald, emerald]);
+    const e = evaluateSpin(result, 10);
+    // center = diamond x3 win; diagDown = emerald,diamond,emerald -> no; diagUp = ruby,diamond,crown -> no.
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['center']);
+    expect(e.matchedSymbol?.id).toBe('diamond');
+  });
+});
+
+describe('evaluateSpin — wilds & jackpot', () => {
+  it('substitutes a wild to complete a diagonal', () => {
+    // ↘ diagonal: diamond, wild, diamond. Center & ↗ kept non-winning.
+    const result = grid([diamond, amethyst, sapphire], [emerald, wild, ruby], [crown, amethyst, diamond]);
+    const e = evaluateSpin(result, 10);
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['diagDown']);
+    expect(e.win).toBe(10 * diamond.payout);
+    expect(e.matchedSymbol?.id).toBe('diamond');
+  });
+
+  it('awards the jackpot for three wilds on a line', () => {
+    // Center all wild; diagonals deliberately mismatched so they do not win.
+    const result = grid([emerald, amethyst, sapphire], [wild, wild, wild], [crown, amethyst, ruby]);
+    const e = evaluateSpin(result, 10);
+    expect(e.isJackpot).toBe(true);
+    expect(e.win).toBe(10 * JACKPOT_MULTIPLIER);
+    expect(e.lineWins.map((w) => w.lineId)).toEqual(['center']);
+  });
+});
+
+describe('evaluateSpin — no win', () => {
+  it('pays nothing when no line matches', () => {
+    const result = grid([ruby, emerald, sapphire], [crown, diamond, amethyst], [emerald, ruby, crown]);
+    const e = evaluateSpin(result, 10);
+    expect(e.win).toBe(0);
+    expect(e.isJackpot).toBe(false);
+    expect(e.matchedSymbol).toBeNull();
+    expect(e.lineWins).toEqual([]);
   });
 });

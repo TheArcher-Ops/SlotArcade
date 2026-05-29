@@ -1,4 +1,4 @@
-import type { Reel, Rng, Symbol, SpinEvaluation, SpinResult } from './types';
+import type { LineWin, Payline, Reel, Rng, Symbol, SpinEvaluation, SpinResult } from './types';
 import { JACKPOT_MULTIPLIER, SYMBOLS, TOTAL_WEIGHT } from './symbols';
 
 /**
@@ -39,47 +39,78 @@ export function spinReels(rng: Rng): SpinResult {
   };
 }
 
-/** The center row (index 1) is the active payline. */
-function paylineSymbols(result: SpinResult): [Symbol, Symbol, Symbol] {
-  return [result.reels[0][1], result.reels[1][1], result.reels[2][1]];
+/**
+ * The three active paylines, each passing through the center cell:
+ *  - center: D-E-F (center row)
+ *  - diagDown: A-E-I (top-left → bottom-right)
+ *  - diagUp: C-E-G (top-right → bottom-left)
+ * Together the two diagonals form an "X".
+ */
+export const PAYLINES: Payline[] = [
+  { id: 'center', name: 'Center Row', cells: [[0, 1], [1, 1], [2, 1]] },
+  { id: 'diagDown', name: 'Diagonal ↘', cells: [[0, 0], [1, 1], [2, 2]] },
+  { id: 'diagUp', name: 'Diagonal ↗', cells: [[0, 2], [1, 1], [2, 0]] },
+];
+
+/** The three symbols sitting on a payline, ordered left-to-right by reel. */
+function symbolsOnLine(result: SpinResult, line: Payline): [Symbol, Symbol, Symbol] {
+  const [a, b, c] = line.cells;
+  return [
+    result.reels[a[0]][a[1]],
+    result.reels[b[0]][b[1]],
+    result.reels[c[0]][c[1]],
+  ];
 }
 
 /**
- * Evaluate the center payline.
+ * Evaluate a single payline.
  *
  * Rules:
  *  - Three Wilds → jackpot (bet × JACKPOT_MULTIPLIER).
  *  - Otherwise, all three positions must share a single non-wild gem, where a
  *    Wild substitutes for that gem. The payout is bet × that gem's multiplier.
- *  - Anything else pays nothing.
+ *  - Anything else pays nothing (returns null).
+ */
+function evaluateLine(line: Payline, symbols: [Symbol, Symbol, Symbol], bet: number): LineWin | null {
+  // All wilds → jackpot.
+  if (symbols.every((s) => s.isWild)) {
+    return { lineId: line.id, symbol: symbols[0], isJackpot: true, win: bet * JACKPOT_MULTIPLIER };
+  }
+
+  // All non-wild gems must be the same (wilds substitute).
+  const nonWilds = symbols.filter((s) => !s.isWild);
+  const firstId = nonWilds[0].id;
+  if (nonWilds.every((s) => s.id === firstId)) {
+    const matched = nonWilds[0];
+    return { lineId: line.id, symbol: matched, isJackpot: false, win: bet * matched.payout };
+  }
+
+  return null;
+}
+
+/**
+ * Evaluate a spin across all paylines. Every winning line pays independently
+ * and the payouts are summed.
  */
 export function evaluateSpin(result: SpinResult, bet: number): SpinEvaluation {
-  const line = paylineSymbols(result);
-
-  // All wilds → jackpot.
-  if (line.every((s) => s.isWild)) {
-    const wild = line[0];
-    return {
-      win: bet * JACKPOT_MULTIPLIER,
-      isJackpot: true,
-      matchedSymbol: wild,
-    };
+  const lineWins: LineWin[] = [];
+  for (const line of PAYLINES) {
+    const win = evaluateLine(line, symbolsOnLine(result, line), bet);
+    if (win) lineWins.push(win);
   }
 
-  // Find the single non-wild gem on the line. If there is more than one
-  // distinct gem, there is no win.
-  const nonWilds = line.filter((s) => !s.isWild);
-  const firstId = nonWilds[0].id;
-  const allMatch = nonWilds.every((s) => s.id === firstId);
+  const total = lineWins.reduce((sum, w) => sum + w.win, 0);
+  const isJackpot = lineWins.some((w) => w.isJackpot);
+  // The highest-paying line's symbol drives the win overlay's display.
+  const best = lineWins.reduce<LineWin | null>(
+    (b, w) => (b === null || w.win > b.win ? w : b),
+    null,
+  );
 
-  if (allMatch) {
-    const matched = nonWilds[0];
-    return {
-      win: bet * matched.payout,
-      isJackpot: false,
-      matchedSymbol: matched,
-    };
-  }
-
-  return { win: 0, isJackpot: false, matchedSymbol: null };
+  return {
+    win: total,
+    isJackpot,
+    matchedSymbol: best?.symbol ?? null,
+    lineWins,
+  };
 }

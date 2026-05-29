@@ -3,6 +3,7 @@ import { useGameState } from '../state/useGameState';
 import { setMuted as setAudioMuted, startBgMusic } from '../audio/sounds';
 import { Reel } from './Reel';
 import { Controls } from './Controls';
+import { Paylines } from './Paylines';
 import { Paytable } from './Paytable';
 import { WinOverlay } from './WinOverlay';
 
@@ -48,8 +49,8 @@ export function SlotMachine() {
           {game.grid.reels.map((reel, i) => (
             <Reel key={i} reel={reel} spinning={game.reelSpinning[i]} highlight={won} />
           ))}
+          <Paylines lineWins={game.lastResult?.lineWins ?? []} active={won} />
         </div>
-        <div className="payline-marker" aria-hidden="true" />
       </div>
 
       <Controls
